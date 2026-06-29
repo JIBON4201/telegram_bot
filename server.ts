@@ -11,7 +11,7 @@ dotenv.config();
 
 import { createServer as createViteServer } from 'vite';
 import { webhookCallback } from 'grammy';
-import { bot, startBot } from './server/bot/index.ts';
+import { bot, startBot, stopBot } from './server/bot/index.ts';
 import './server/bot/handlers.ts'; // Initialize handlers
 import { requireAuth, requireAdmin, AuthRequest } from './server/middleware/auth.ts';
 import { db } from './src/db/index.ts';
@@ -316,6 +316,7 @@ async function startServer() {
         const webhookUrl = `${appUrl}/api/bot-webhook`;
         console.log(`📡 Configuring bot with Webhook: ${webhookUrl}`);
         try {
+          await stopBot();
           await bot.api.setWebhook(webhookUrl);
           console.log('✅ Webhook set successfully');
         } catch (e) {

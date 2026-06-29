@@ -40,12 +40,18 @@ if (bot) {
 import { run } from '@grammyjs/runner';
 
 let activeRunner: any = null;
+let isStarting = false;
 
 export async function stopBot() {
-  if (activeRunner && activeRunner.isRunning()) {
-    console.log('🛑 Stopping bot runner...');
-    await activeRunner.stop();
-    activeRunner = null;
+  if (activeRunner) {
+    try {
+      console.log('🛑 Stopping bot runner...');
+      await activeRunner.stop();
+      activeRunner = null;
+      console.log('✅ Bot runner stopped');
+    } catch (e) {
+      console.error('⚠️ Error while stopping bot:', e);
+    }
   }
 }
 
@@ -55,38 +61,73 @@ export async function startBot() {
     return;
   }
 
-  if (activeRunner && activeRunner.isRunning()) {
-    console.log('🔄 Bot runner already active, stopping old instance first...');
-    await stopBot();
-  }
-  
-  try {
-    console.log('🧹 Cleaning up any existing webhooks or sessions...');
-    await bot.api.deleteWebhook({ drop_pending_updates: true });
-    // Wait to avoid 409 Conflict
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    console.log('✅ Webhook cleaned up');
-  } catch (e) {
-    console.warn('⚠️ Non-critical error while cleaning up webhook:', e);
+  if (isStarting) {
+    console.log('⏳ Bot startup already in progress, skipping...');
+    return;
   }
 
-  console.log('🚀 Starting Telegram bot with Concurrent Runner...');
+  isStarting = true;
+
   try {
+    if (activeRunner && activeRunner.isRunning()) {
+      console.log('🔄 Bot runner already active, stopping old instance first...');
+      await stopBot();
+    }
+    
+    // Check if token is valid
+    try {
+      const me = await bot.api.getMe();
+      console.log(`🤖 Logged in as @${me.username}`);
+    } catch (e: any) {
+      console.error('❌ Failed to connect to Telegram API. Check your token:', e.message);
+      isStarting = false;
+      return;
+    }
+
+    try {
+      console.log('🧹 Cleaning up any existing webhooks...');
+      await bot.api.deleteWebhook({ drop_pending_updates: true });
+      // Extra wait to let Telegram servers propagate the change
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      console.log('✅ Webhook cleaned up');
+    } catch (e) {
+      console.warn('⚠️ Non-critical error while cleaning up webhook:', e);
+    }
+
+    console.log('🚀 Starting Telegram bot with Concurrent Runner...');
     activeRunner = run(bot);
     
+    activeRunner.task.catch((err: any) => {
+      if (err.message && err.message.includes('409')) {
+        console.error('❌ Bot Conflict Error (409) detected in runner task. Another instance might be running.');
+      } else {
+        console.error('❌ Runner task failed:', err);
+      }
+    });
+
     if (activeRunner.isRunning()) {
       console.log(`✅ Bot is online (Concurrent)`);
       
       // Stop the runner when the process is about to exit
-      process.once('SIGINT', () => stopBot());
-      process.once('SIGTERM', () => stopBot());
+      const cleanup = async () => {
+        await stopBot();
+        process.exit(0);
+      };
+      process.once('SIGINT', cleanup);
+      process.once('SIGTERM', cleanup);
     }
   } catch (err: any) {
     if (err.message && err.message.includes('409')) {
-      console.error('❌ Bot Conflict Error (409). Another instance is likely running. Retrying in 10s...');
-      setTimeout(startBot, 10000);
+      const delay = 5000 + Math.random() * 10000;
+      console.error(`❌ Bot Conflict Error (409). Retrying in ${Math.round(delay/1000)}s...`);
+      setTimeout(() => {
+        isStarting = false;
+        startBot();
+      }, delay);
     } else {
       console.error('❌ Failed to start bot:', err);
     }
+  } finally {
+    isStarting = false;
   }
 }
