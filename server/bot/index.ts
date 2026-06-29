@@ -5,7 +5,7 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 import { db } from '../../src/db/index.ts';
-import { users, referrals, tasks, userTasks, transactions, settings, bonusHistory, wallets, withdraws, deposits, channels, achievements, userAchievements } from '../../src/db/schema.ts';
+import { users, referrals, tasks, userTasks, transactions, settings, bonusHistory, wallets, withdrawals, deposits, channels, achievements, userAchievements } from '../../src/db/schema.ts';
 import { eq, and, sql, desc, count, sum } from 'drizzle-orm';
 
 export interface SessionData {
@@ -39,16 +39,54 @@ if (bot) {
 
 import { run } from '@grammyjs/runner';
 
+let activeRunner: any = null;
+
+export async function stopBot() {
+  if (activeRunner && activeRunner.isRunning()) {
+    console.log('🛑 Stopping bot runner...');
+    await activeRunner.stop();
+    activeRunner = null;
+  }
+}
+
 export async function startBot() {
   if (!bot) {
     console.warn('⚠️ Cannot start bot: Bot instance is null. Check your TELEGRAM_BOT_TOKEN.');
     return;
   }
+
+  if (activeRunner && activeRunner.isRunning()) {
+    console.log('🔄 Bot runner already active, stopping old instance first...');
+    await stopBot();
+  }
   
+  try {
+    console.log('🧹 Cleaning up any existing webhooks or sessions...');
+    await bot.api.deleteWebhook({ drop_pending_updates: true });
+    // Wait to avoid 409 Conflict
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    console.log('✅ Webhook cleaned up');
+  } catch (e) {
+    console.warn('⚠️ Non-critical error while cleaning up webhook:', e);
+  }
+
   console.log('🚀 Starting Telegram bot with Concurrent Runner...');
-  const runner = run(bot);
-  
-  if (runner.isRunning()) {
-    console.log(`✅ Bot is online (Concurrent)`);
+  try {
+    activeRunner = run(bot);
+    
+    if (activeRunner.isRunning()) {
+      console.log(`✅ Bot is online (Concurrent)`);
+      
+      // Stop the runner when the process is about to exit
+      process.once('SIGINT', () => stopBot());
+      process.once('SIGTERM', () => stopBot());
+    }
+  } catch (err: any) {
+    if (err.message && err.message.includes('409')) {
+      console.error('❌ Bot Conflict Error (409). Another instance is likely running. Retrying in 10s...');
+      setTimeout(startBot, 10000);
+    } else {
+      console.error('❌ Failed to start bot:', err);
+    }
   }
 }

@@ -75,7 +75,7 @@ export const wallets = pgTable('wallets', {
   userIdIdx: index('wallet_user_idx').on(table.userId),
 }));
 
-export const withdraws = pgTable('withdraws', {
+export const withdrawals = pgTable('withdrawals', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').references(() => users.id).notNull(),
   amount: doublePrecision('amount').notNull(),
@@ -84,7 +84,7 @@ export const withdraws = pgTable('withdraws', {
   status: withdrawStatusEnum('status').default('pending').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => ({
-  userIdIdx: index('withdraw_user_idx').on(table.userId),
+  userIdIdx: index('withdrawal_user_idx').on(table.userId),
 }));
 
 export const deposits = pgTable('deposits', {
@@ -173,7 +173,7 @@ export const usersRelations = relations(users, ({ one, many }) => ({
     fields: [users.id],
     references: [wallets.userId],
   }),
-  withdraws: many(withdraws),
+  withdrawals: many(withdrawals),
   deposits: many(deposits),
   transactions: many(transactions),
   tasks: many(userTasks),

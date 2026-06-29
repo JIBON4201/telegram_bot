@@ -15,7 +15,7 @@ import { bot, startBot } from './server/bot/index.ts';
 import './server/bot/handlers.ts'; // Initialize handlers
 import { requireAuth, requireAdmin, AuthRequest } from './server/middleware/auth.ts';
 import { db } from './src/db/index.ts';
-import { users, tasks, withdraws, deposits, admins, settings, transactions, wallets } from './src/db/schema.ts';
+import { users, tasks, withdrawals, deposits, admins, settings, transactions, wallets } from './src/db/schema.ts';
 import { eq, and, sql, desc, count, sum, gte, or } from 'drizzle-orm';
 
 const app = express();
@@ -35,10 +35,27 @@ if (bot) {
 }
 
 // Health check
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
+  let dbStatus = 'unknown';
+  let adminsTable = 'unknown';
+  try {
+    const result = await db.execute(sql`SELECT 1`);
+    dbStatus = 'connected';
+    const tableCheck = await db.execute(sql`SELECT table_name FROM information_schema.tables WHERE table_name = 'admins'`);
+    adminsTable = tableCheck.rows.length > 0 ? 'exists' : 'missing';
+  } catch (e) {
+    dbStatus = 'error';
+    console.error('Health check DB error:', e);
+  }
+
   res.json({ 
     status: 'ok', 
+    db: dbStatus,
+    adminsTable,
+    usingExternalDb: !!process.env.DATABASE_URL,
+    envKeys: Object.keys(process.env).filter(k => !k.includes('PASSWORD') && !k.includes('KEY') && !k.includes('TOKEN') && !k.includes('URL')),
     botInitialized: !!bot,
+    botUsername: bot?.token ? 'Bot is active' : 'Not set',
     env: process.env.NODE_ENV || 'development'
   });
 });
@@ -50,7 +67,7 @@ app.get('/api/stats', requireAdmin, async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayUsers = (await db.select({ count: count() }).from(users).where(gte(users.joinDate, today)))[0].count;
-    const pendingWithdraws = (await db.select({ count: count() }).from(withdraws).where(eq(withdraws.status, 'pending')))[0].count;
+    const pendingWithdraws = (await db.select({ count: count() }).from(withdrawals).where(eq(withdrawals.status, 'pending')))[0].count;
 
     res.json({
       totalUsers,
@@ -113,47 +130,47 @@ app.post('/api/tasks', requireAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/withdraws', requireAdmin, async (req, res) => {
+app.get('/api/withdrawals', requireAdmin, async (req, res) => {
   try {
     const data = await db.select({
-      id: withdraws.id,
-      userId: withdraws.id,
-      amount: withdraws.amount,
-      status: withdraws.status,
-      createdAt: withdraws.createdAt,
+      id: withdrawals.id,
+      userId: withdrawals.userId,
+      amount: withdrawals.amount,
+      status: withdrawals.status,
+      createdAt: withdrawals.createdAt,
       walletAddress: wallets.address,
       network: wallets.network,
       userFullName: users.fullName,
       userUsername: users.username
     })
-    .from(withdraws)
-    .innerJoin(wallets, eq(withdraws.walletId, wallets.id))
-    .innerJoin(users, eq(withdraws.userId, users.id))
-    .orderBy(desc(withdraws.createdAt));
+    .from(withdrawals)
+    .innerJoin(wallets, eq(withdrawals.walletId, wallets.id))
+    .innerJoin(users, eq(withdrawals.userId, users.id))
+    .orderBy(desc(withdrawals.createdAt));
     res.json(data);
   } catch (error) {
-    console.error('Fetch withdraws error:', error);
-    res.status(500).json({ error: 'Failed to fetch withdraws' });
+    console.error('Fetch withdrawals error:', error);
+    res.status(500).json({ error: 'Failed to fetch withdrawals' });
   }
 });
 
-app.get('/api/withdraws/pending', requireAdmin, async (req, res) => {
+app.get('/api/withdrawals/pending', requireAdmin, async (req, res) => {
   try {
-    const pending = await db.select().from(withdraws).where(eq(withdraws.status, 'pending')).orderBy(desc(withdraws.createdAt));
+    const pending = await db.select().from(withdrawals).where(eq(withdrawals.status, 'pending')).orderBy(desc(withdrawals.createdAt));
     res.json(pending);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch withdraws' });
+    res.status(500).json({ error: 'Failed to fetch withdrawals' });
   }
 });
 
-app.post('/api/withdraws/:id/status', requireAdmin, async (req, res) => {
+app.post('/api/withdrawals/:id/status', requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
   const { status } = req.body;
   try {
-    await db.update(withdraws).set({ status }).where(eq(withdraws.id, id));
+    await db.update(withdrawals).set({ status }).where(eq(withdrawals.id, id));
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update withdraw status' });
+    res.status(500).json({ error: 'Failed to update withdrawal status' });
   }
 });
 
@@ -257,8 +274,9 @@ app.post('/api/auth/sync', requireAuth, async (req: AuthRequest, res) => {
       await db.insert(admins).values({ webUid: req.user.uid, username: req.user.email });
     }
     res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: 'Sync failed' });
+  } catch (error: any) {
+    console.error('❌ User Sync failed:', error);
+    res.status(500).json({ error: `Sync failed: ${error.message}` });
   }
 });
 
@@ -281,6 +299,14 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Server running on http://localhost:${PORT}`);
     
+    // DB Check
+    try {
+      const result = await db.execute(sql`SELECT table_name FROM information_schema.tables WHERE table_name = 'admins'`);
+      console.log('🔍 DB Check - Admins table status:', result.rows.length > 0 ? 'EXISTS' : 'NOT FOUND');
+    } catch (e) {
+      console.error('❌ DB Check - Error accessing database:', e);
+    }
+    
     if (bot) {
       const isDev = process.env.NODE_ENV !== 'production';
       const appUrl = process.env.APP_URL;
@@ -294,11 +320,11 @@ async function startServer() {
           console.log('✅ Webhook set successfully');
         } catch (e) {
           console.error('❌ Failed to set Telegram webhook. Falling back to Polling...', e);
-          startBot();
+          await startBot();
         }
       } else {
         console.log(`🔄 ${isDev ? 'Development mode' : 'No valid APP_URL'}: starting bot with Long Polling...`);
-        startBot();
+        await startBot();
       }
     }
   });

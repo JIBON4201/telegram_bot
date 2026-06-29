@@ -88,7 +88,7 @@ export default function App() {
             <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={18} />} label="Dashboard" />
             <NavItem active={activeTab === 'users'} onClick={() => setActiveTab('users')} icon={<Users size={18} />} label="User Management" />
             <NavItem active={activeTab === 'tasks'} onClick={() => setActiveTab('tasks')} icon={<CheckSquare size={18} />} label="Task Configuration" />
-            <NavItem active={activeTab === 'withdraws'} onClick={() => setActiveTab('withdraws')} icon={<Wallet size={18} />} label="TON Withdrawals" />
+            <NavItem active={activeTab === 'withdrawals'} onClick={() => setActiveTab('withdrawals')} icon={<Wallet size={18} />} label="TON Withdrawals" />
             <NavItem active={activeTab === 'deposits'} onClick={() => setActiveTab('deposits')} icon={<CreditCard size={18} />} label="Deposit Requests" />
             <NavItem active={activeTab === 'broadcast'} onClick={() => setActiveTab('broadcast')} icon={<Send size={18} />} label="Broadcast System" />
             
@@ -113,7 +113,7 @@ export default function App() {
                   {activeTab === 'dashboard' && <Dashboard />}
                   {activeTab === 'users' && <UsersList />}
                   {activeTab === 'tasks' && <TasksManager />}
-                  {activeTab === 'withdraws' && <WithdrawsManager />}
+                  {activeTab === 'withdrawals' && <WithdrawalsManager />}
                   {activeTab === 'deposits' && <DepositsManager />}
                   {activeTab === 'broadcast' && <BroadcastManager />}
                 </motion.div>
@@ -164,40 +164,59 @@ function Dashboard() {
   const { getToken } = useAuth();
   const [stats, setStats] = useState<any>(null);
 
-  useEffect(() => {
-    const fetchStats = async () => {
+  const fetchStats = async () => {
+    try {
       const token = await getToken();
       const res = await fetch('/api/stats', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      setStats(data);
-    };
+      if (res.ok) {
+        setStats(data);
+      } else {
+        setStats({ error: data.error || 'Failed to fetch stats' });
+      }
+    } catch (e) {
+      setStats({ error: 'Network error' });
+    }
+  };
+
+  useEffect(() => {
     fetchStats();
+    const interval = setInterval(fetchStats, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   if (!stats) return <div className="flex justify-center p-12"><Loader2 className="animate-spin text-primary" /></div>;
+  if (stats.error) return <div className="p-12 text-center text-red-400 font-mono text-xs uppercase tracking-widest">{stats.error}</div>;
 
   return (
     <div className="grid grid-cols-12 gap-6">
+      <div className="col-span-12 flex justify-between items-center bg-secondary/20 p-3 rounded-lg border border-border">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+          <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">System Live</span>
+        </div>
+        <span className="text-[10px] text-muted-foreground font-mono">LAST_SYNC: {new Date().toLocaleTimeString()}</span>
+      </div>
       <div className="col-span-4 bg-card border border-border rounded-lg p-4 flex flex-col justify-between min-h-[100px]">
         <span className="text-muted-foreground text-xs font-bold uppercase tracking-wider">Total Users</span>
         <div className="flex items-end justify-between">
-          <span className="text-3xl font-mono text-foreground">{stats.totalUsers.toLocaleString()}</span>
+          <span className="text-3xl font-mono text-foreground">{(stats.totalUsers || 0).toLocaleString()}</span>
           <span className="text-primary text-xs font-bold">+12% ↑</span>
         </div>
       </div>
       <div className="col-span-4 bg-card border border-border rounded-lg p-4 flex flex-col justify-between min-h-[100px]">
         <span className="text-muted-foreground text-xs font-bold uppercase tracking-wider">Today's Joins</span>
         <div className="flex items-end justify-between">
-          <span className="text-3xl font-mono text-foreground">{stats.todayUsers.toLocaleString()}</span>
+          <span className="text-3xl font-mono text-foreground">{(stats.todayUsers || 0).toLocaleString()}</span>
           <span className="text-muted-foreground text-[10px]">REAL-TIME</span>
         </div>
       </div>
       <div className="col-span-4 bg-card border border-border rounded-lg p-4 flex flex-col justify-between min-h-[100px]">
-        <span className="text-muted-foreground text-xs font-bold uppercase tracking-wider">Pending TON Withdraws</span>
+        <span className="text-muted-foreground text-xs font-bold uppercase tracking-wider">Pending Withdrawals</span>
         <div className="flex items-end justify-between">
-          <span className={`text-3xl font-mono ${stats.pendingWithdraws > 0 ? 'text-amber-500' : 'text-foreground'}`}>{stats.pendingWithdraws}</span>
+          <span className={`text-3xl font-mono ${(stats.pendingWithdraws || 0) > 0 ? 'text-amber-500' : 'text-foreground'}`}>{stats.pendingWithdraws || 0}</span>
           <span className="text-blue-400 text-xs font-bold">ACTION REQ</span>
         </div>
       </div>
@@ -389,7 +408,7 @@ function UsersList() {
                     <div className="text-[10px] text-blue-400 font-mono">TON: ${user.balanceWithdrawable.toFixed(4)}</div>
                   </TableCell>
                   <TableCell className="text-[10px] text-muted-foreground font-mono">
-                    {new Date(user.joinDate).toISOString().split('T')[0]}
+                    {user.joinDate ? new Date(user.joinDate).toISOString().split('T')[0] : 'N/A'}
                   </TableCell>
                   <TableCell>
                     <Badge className={user.isBanned ? "bg-red-500/20 text-red-500 border-red-500/30" : "bg-emerald-500/20 text-emerald-500 border-emerald-500/30"}>
@@ -580,26 +599,26 @@ function TasksManager() {
   );
 }
 
-function WithdrawsManager() {
+function WithdrawalsManager() {
   const { getToken } = useAuth();
-  const [withdraws, setWithdraws] = useState<any[]>([]);
+  const [withdrawals, setWithdrawals] = useState<any[]>([]);
 
-  const fetchWithdraws = async () => {
+  const fetchWithdrawals = async () => {
     const token = await getToken();
-    const res = await fetch('/api/withdraws', {
+    const res = await fetch('/api/withdrawals', {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const data = await res.json();
-    setWithdraws(Array.isArray(data) ? data : []);
+    setWithdrawals(Array.isArray(data) ? data : []);
   };
 
   useEffect(() => {
-    fetchWithdraws();
+    fetchWithdrawals();
   }, []);
 
   const handleUpdateStatus = async (id: number, status: string) => {
     const token = await getToken();
-    await fetch(`/api/withdraws/${id}/status`, {
+    await fetch(`/api/withdrawals/${id}/status`, {
       method: 'POST',
       headers: { 
         'Authorization': `Bearer ${token}`,
@@ -607,7 +626,7 @@ function WithdrawsManager() {
       },
       body: JSON.stringify({ status })
     });
-    fetchWithdraws();
+    fetchWithdrawals();
   };
 
   const getStatusBadge = (status: string) => {
@@ -629,7 +648,7 @@ function WithdrawsManager() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold text-foreground uppercase tracking-tight">Withdrawal Management</h2>
-        <Button size="sm" variant="outline" onClick={fetchWithdraws} className="text-xs h-8">Refresh</Button>
+        <Button size="sm" variant="outline" onClick={fetchWithdrawals} className="text-xs h-8">Refresh</Button>
       </div>
       <Card className="bg-card border-border overflow-hidden">
         <Table>
@@ -643,7 +662,7 @@ function WithdrawsManager() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {Array.isArray(withdraws) && withdraws.map((w) => (
+            {Array.isArray(withdrawals) && withdrawals.map((w) => (
               <TableRow key={w.id} className="border-border hover:bg-secondary/10">
                 <TableCell className="text-xs">
                   <div className="font-bold">{w.userFullName || `User #${w.userId}`}</div>
@@ -672,7 +691,7 @@ function WithdrawsManager() {
                 </TableCell>
               </TableRow>
             ))}
-            {Array.isArray(withdraws) && withdraws.length === 0 && (
+            {Array.isArray(withdrawals) && withdrawals.length === 0 && (
               <TableRow>
                 <TableCell colSpan={5} className="text-center py-12 text-muted-foreground text-xs uppercase tracking-widest">No withdrawal records</TableCell>
               </TableRow>
@@ -740,7 +759,7 @@ function DepositsManager() {
                     {d.status.toUpperCase()}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-[10px] text-muted-foreground font-mono">{new Date(d.createdAt).toLocaleString()}</TableCell>
+                <TableCell className="text-[10px] text-muted-foreground font-mono">{d.createdAt ? new Date(d.createdAt).toLocaleString() : 'N/A'}</TableCell>
                 <TableCell>
                   {d.status === 'pending' && (
                     <Button size="sm" onClick={() => handleApprove(d.id)} className="text-[10px] h-7">Verify & Approve</Button>

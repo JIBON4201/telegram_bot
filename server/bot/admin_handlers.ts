@@ -1,10 +1,14 @@
 import { bot, type MyContext, BOT_START_TIME } from './index.ts';
 import { db } from '../../src/db/index.ts';
-import { users, referrals, tasks, userTasks, transactions, settings, bonusHistory, wallets, withdraws, deposits, channels, achievements, userAchievements, admins, adminLogs } from '../../src/db/schema.ts';
+import { users, referrals, tasks, userTasks, transactions, settings, bonusHistory, wallets, withdrawals, deposits, channels, achievements, userAchievements, admins, adminLogs } from '../../src/db/schema.ts';
 import { eq, and, sql, desc, count, sum, or, gte, lte } from 'drizzle-orm';
 import { InlineKeyboard } from 'grammy';
 
-const ADMIN_IDS = [584404609395]; // Hardcoded Super Admins
+const envAdminId = process.env.ADMIN_TG_ID ? parseInt(process.env.ADMIN_TG_ID) : null;
+const ADMIN_IDS = [584404609395]; // Hardcoded fallback
+if (envAdminId && !ADMIN_IDS.includes(envAdminId)) {
+    ADMIN_IDS.push(envAdminId);
+}
 
 function getUptime() {
     const diff = Date.now() - BOT_START_TIME.getTime();
@@ -55,9 +59,9 @@ async function getDashboardStats() {
         db.select({ count: count() }).from(referrals).then(res => res[0].count),
         db.select({ count: count() }).from(tasks).then(res => res[0].count),
         db.select({ count: count() }).from(channels).then(res => res[0].count),
-        db.select({ total: sum(withdraws.amount) }).from(withdraws).where(eq(withdraws.status, 'completed')).then(res => Number(res[0].total || 0)),
-        db.select({ count: count() }).from(withdraws).where(eq(withdraws.status, 'pending')).then(res => res[0].count),
-        db.select({ count: count() }).from(withdraws).where(eq(withdraws.status, 'completed')).then(res => res[0].count),
+        db.select({ total: sum(withdrawals.amount) }).from(withdrawals).where(eq(withdrawals.status, 'completed')).then(res => Number(res[0].total || 0)),
+        db.select({ count: count() }).from(withdrawals).where(eq(withdrawals.status, 'pending')).then(res => res[0].count),
+        db.select({ count: count() }).from(withdrawals).where(eq(withdrawals.status, 'completed')).then(res => res[0].count),
         db.select({ count: count() }).from(deposits).where(eq(deposits.status, 'pending')).then(res => res[0].count)
     ]);
 
@@ -92,7 +96,7 @@ if (bot) {
         const menu = new InlineKeyboard()
             .text('📢 Channels', 'adm_channels').text('📋 Tasks', 'adm_tasks').row()
             .text('👥 Users', 'adm_users').text('💰 Rewards', 'adm_rewards').row()
-            .text('💸 Withdraws', 'adm_withdraws').text('💵 Deposits', 'adm_deposits').row()
+            .text('💸 Withdrawals', 'adm_withdrawals').text('💵 Deposits', 'adm_deposits').row()
             .text('📢 Broadcast', 'adm_broadcast').text('📊 Statistics', 'adm_stats').row()
             .text('⚙️ Settings', 'adm_settings').text('🔐 Admins', 'adm_manage_admins').row()
             .text('📁 Export', 'adm_export').text('📝 Logs', 'adm_logs').row()
@@ -127,7 +131,7 @@ if (bot) {
             const menu = new InlineKeyboard()
                 .text('📢 Channels', 'adm_channels').text('📋 Tasks', 'adm_tasks').row()
                 .text('👥 Users', 'adm_users').text('💰 Rewards', 'adm_rewards').row()
-                .text('💸 Withdraws', 'adm_withdraws').text('💵 Deposits', 'adm_deposits').row()
+                .text('💸 Withdrawals', 'adm_withdrawals').text('💵 Deposits', 'adm_deposits').row()
                 .text('📢 Broadcast', 'adm_broadcast').text('📊 Statistics', 'adm_stats').row()
                 .text('⚙️ Settings', 'adm_settings').text('🔐 Admins', 'adm_manage_admins').row()
                 .text('📁 Export', 'adm_export').text('📝 Logs', 'adm_logs').row()
@@ -178,9 +182,9 @@ if (bot) {
             }
         }
 
-        // --- Withdraws Section ---
-        if (data === 'adm_withdraws') {
-            const pending = await db.select().from(withdraws).where(eq(withdraws.status, 'pending')).orderBy(desc(withdraws.createdAt)).limit(10);
+        // --- Withdrawals Section ---
+        if (data === 'adm_withdrawals') {
+            const pending = await db.select().from(withdrawals).where(eq(withdrawals.status, 'pending')).orderBy(desc(withdrawals.createdAt)).limit(10);
             let msg = `💸 *PENDING WITHDRAWALS*\n\n`;
             if (pending.length === 0) msg += "_No pending withdrawals._";
             const kb = new InlineKeyboard();
@@ -195,15 +199,15 @@ if (bot) {
 
         if (data.startsWith('adm_wdr_approve_')) {
             const id = parseInt(data.replace('adm_wdr_approve_', ''));
-            const wdr = (await db.select().from(withdraws).where(eq(withdraws.id, id)))[0];
+            const wdr = (await db.select().from(withdrawals).where(eq(withdrawals.id, id)))[0];
             if (wdr && wdr.status === 'pending') {
-                await db.update(withdraws).set({ status: 'completed' }).where(eq(withdraws.id, id));
+                await db.update(withdrawals).set({ status: 'completed' }).where(eq(withdrawals.id, id));
                 await logAction(ctx, 'Approve Withdrawal', `ID: ${id}, User: ${wdr.userId}, Amt: ${wdr.amount}`);
                 await ctx.answerCallbackQuery('✅ Withdrawal Approved');
                 // Notify user
                 const user = (await db.select().from(users).where(eq(users.id, wdr.userId)))[0];
                 if (user) bot.api.sendMessage(Number(user.tgId), `✅ *Withdrawal Approved!*\n\nYour withdrawal request for *$${wdr.amount} Ton* has been processed and sent to your wallet.`, { parse_mode: 'Markdown' }).catch(() => {});
-                return ctx.editMessageText('✅ Approved. Refreshing...', { reply_markup: new InlineKeyboard().text('🔄 Refresh', 'adm_withdraws') });
+                return ctx.editMessageText('✅ Approved. Refreshing...', { reply_markup: new InlineKeyboard().text('🔄 Refresh', 'adm_withdrawals') });
             }
         }
 
@@ -283,7 +287,7 @@ if (bot) {
         if (data === 'adm_export') {
             const kb = new InlineKeyboard()
                 .text('📄 Export Users (CSV)', 'adm_export_users').row()
-                .text('📄 Export Withdraws (CSV)', 'adm_export_withdraws').row()
+                .text('📄 Export Withdrawals (CSV)', 'adm_export_withdrawals').row()
                 .text('🏠 Home', 'adm_dashboard_refresh');
             await ctx.editMessageText('📁 *DATA EXPORT*\n\nGenerate CSV files for your data.', { parse_mode: 'Markdown', reply_markup: kb });
             return ctx.answerCallbackQuery();

@@ -1,7 +1,7 @@
 import { bot, type MyContext, type SessionData } from './index.ts';
 import { mainMenu, inviteMenu, cancelMenu } from './keyboards.ts';
 import { db } from '../../src/db/index.ts';
-import { users, referrals, tasks, userTasks, transactions, settings, bonusHistory, wallets, withdraws, deposits, channels, achievements, userAchievements, admins } from '../../src/db/schema.ts';
+import { users, referrals, tasks, userTasks, transactions, settings, bonusHistory, wallets, withdrawals, deposits, channels, achievements, userAchievements, admins } from '../../src/db/schema.ts';
 import { eq, and, sql, desc, count, sum, or, gte } from 'drizzle-orm';
 import { InlineKeyboard, session, Context, SessionFlavor } from 'grammy';
 import { type Conversation, type ConversationFlavor, conversations, createConversation } from "@grammyjs/conversations";
@@ -698,7 +698,7 @@ if (bot) {
         .set({ balanceWithdrawable: sql`${users.balanceWithdrawable} - ${amount}` })
         .where(eq(users.id, user.id));
 
-      await db.insert(withdraws).values({
+      await db.insert(withdrawals).values({
         userId: user.id,
         amount,
         walletId: wallet.id,
