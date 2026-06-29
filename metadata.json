@@ -1,0 +1,6 @@
+{
+  "name": "Referral & Reward Bot",
+  "description": "A comprehensive Telegram bot for referrals, tasks, and rewards with a web-based admin dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
